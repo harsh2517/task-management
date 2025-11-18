@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      background-color: #f8f9fa;
+    }
+    .navbar-brand { color: #fffefd !important; }
+    .card-header { background-color: #0a0a0a; color: #fffefe; }
+    footer {
+      background-color: #333333;
+      color: #ffffff;
+      text-align: center;
+      padding: 1rem 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="{{ url_for('dashboard') }}">Accountooze</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navMenu">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item"><a class="nav-link active" href="{{ url_for('dashboard') }}">Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('list_projects') }}">Projects</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('timesheet') }}">My Timesheet</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('timesheet_report') }}">Timesheet Report</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('manage_users') }}">Users</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('change_password') }}">Change Password</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid my-4">
+    <div class="row">
+
+      <!-- Create Task & Timesheet Summary -->
+      <div class="col-lg-4">
+        <div class="card shadow-sm mb-4">
+          <div class="card-header">
+            <h5 class="card-title mb-0">Create Task</h5>
+          </div>
+          <div class="card-body">
+            <form method="post" action="{{ url_for('dashboard') }}">
+              <div class="mb-3">
+                <label for="title" class="form-label">Title</label>
+                <input type="text" class="form-control" id="title" name="title" required>
+              </div>
+              <div class="mb-3">
+                <label for="priority" class="form-label">Priority</label>
+                <select class="form-select" id="priority" name="priority">
+                  <option value="Low">Low</option>
+                  <option value="Medium" selected>Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="deadline" class="form-label">Deadline</label>
+                <input type="date" class="form-control" id="deadline" name="deadline">
+              </div>
+              <div class="mb-3">
+                <label for="assigned_to" class="form-label">Assign To</label>
+                <select class="form-select" id="assigned_to" name="assigned_to">
+                  {% for user in users %}
+                    <option value="{{ user.id }}">{{ user.username }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="project_id" class="form-label">Project</label>
+                <select class="form-select" id="project_id" name="project_id">
+                  <option value="">–– None ––</option>
+                  {% for project in projects %}
+                    <option value="{{ project.id }}">{{ project.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="estimated_hours" class="form-label">Estimated Hours</label>
+                <input type="number" step="0.1" min="0" name="estimated_hours" class="form-control">
+              </div>
+              <button type="submit" class="btn btn-primary w-100">Add Task</button>
+            </form>
+          </div>
+        </div>
+        <div class="card shadow-sm text-center">
+          <div class="card-body">
+            <h6 class="card-title">Your Hours This Week</h6>
+            <p class="display-6">{{ total_hours }}h</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tasks Table -->
+      <div class="col-lg-8">
+        <div class="card shadow-sm">
+          <div class="card-header bg-light d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">All Tasks</h5>
+            <a href="{{ url_for('export_tasks') }}" class="btn btn-success btn-sm">
+              <i class="bi bi-download"></i> Export Tasks
+            </a>
+          </div>
+
+          <!-- FILTER BAR -->
+          <form method="GET" class="p-3 border-bottom bg-white">
+            <div class="row g-2 align-items-end">
+              <!-- Free text search -->
+              <div class="col-md-3">
+                <label class="form-label mb-1">Search</label>
+                <input type="text" name="q" class="form-control" placeholder="Title / Project / Assignee"
+                       value="{{ request.args.get('q','') }}">
+              </div>
+
+              <!-- Project -->
+              <div class="col-md-2">
+                <label class="form-label mb-1">Project</label>
+                <select name="project_id" class="form-select">
+                  <option value="">All</option>
+                  {% for p in projects %}
+                    <option value="{{ p.id }}" {% if request.args.get('project_id') == p.id|string %}selected{% endif %}>
+                      {{ p.name }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <!-- Assigned To -->
+              <div class="col-md-2">
+                <label class="form-label mb-1">Assigned To</label>
+                <select name="assigned_to" class="form-select">
+                  <option value="">All</option>
+                  {% for u in users %}
+                    <option value="{{ u.id }}" {% if request.args.get('assigned_to') == u.id|string %}selected{% endif %}>
+                      {{ u.username }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <!-- Priority -->
+              <div class="col-md-2">
+                <label class="form-label mb-1">Priority</label>
+                <select name="priority" class="form-select">
+                  {% set psel = request.args.get('priority','') %}
+                  <option value="">All</option>
+                  <option value="Low"    {% if psel=='Low' %}selected{% endif %}>Low</option>
+                  <option value="Medium" {% if psel=='Medium' %}selected{% endif %}>Medium</option>
+                  <option value="High"   {% if psel=='High' %}selected{% endif %}>High</option>
+                </select>
+              </div>
+
+              <!-- Status -->
+              <div class="col-md-2">
+                <label class="form-label mb-1">Status</label>
+                <select name="status" class="form-select">
+                  {% set ssel = request.args.get('status','') %}
+                  <option value="">All</option>
+                  <option value="To Do"       {% if ssel=='To Do' %}selected{% endif %}>To Do</option>
+                  <option value="In Progress" {% if ssel=='In Progress' %}selected{% endif %}>In Progress</option>
+                  <option value="Done"        {% if ssel=='Done' %}selected{% endif %}>Done</option>
+                </select>
+              </div>
+
+              <!-- Deadline range -->
+              <div class="col-md-2">
+                <label class="form-label mb-1">Due From</label>
+                <input type="date" name="due_from" class="form-control"
+                       value="{{ request.args.get('due_from','') }}">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label mb-1">Due To</label>
+                <input type="date" name="due_to" class="form-control"
+                       value="{{ request.args.get('due_to','') }}">
+              </div>
+              <div class="col-md-2 d-grid">
+                <button class="btn btn-primary">Filter</button>
+              </div>
+              <div class="col-md-2 d-grid">
+                <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Reset</a>
+              </div>
+            </div>
+          </form>
+
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-hover mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>ID</th>
+                    <th>Title</th>
+                    <th>Priority</th>
+                    <th>Deadline</th>
+                    <th>Project</th>
+                    <th>Assigned To</th>
+                    <th>Estimated Hours</th>
+                    <th>Status</th>
+                    <th>Timer</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for task in tasks %}
+                  <tr>
+                    <td>{{ task.id }}</td>
+                    <td>{{ task.title }}</td>
+                    <td>
+                      <span class="badge
+                        {% if task.priority == 'High' %}bg-danger
+                        {% elif task.priority == 'Medium' %}bg-warning text-dark
+                        {% else %}bg-secondary{% endif %}">
+                        {{ task.priority }}
+                      </span>
+                    </td>
+                    <td>{{ task.deadline.strftime('%Y-%m-%d') if task.deadline else '—' }}</td>
+                    <td>{{ task.project.name if task.project else '—' }}</td>
+                    <td>{{ task.assigned_user.username if task.assigned_user else '—' }}</td>
+                    <td>{{ task.estimated_hours or 0 }}</td>
+                    <td>
+                      <form method="post" action="{{ url_for('update_task_status', task_id=task.id) }}" class="m-0">
+                        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+                          {% for s in ['To Do','In Progress','Done'] %}
+                            <option value="{{ s }}" {% if task.status == s %}selected{% endif %}>{{ s }}</option>
+                          {% endfor %}
+                        </select>
+                      </form>
+                    </td>
+                    <!-- Timer cell -->
+                    <td>
+                      <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-sm btn-outline-primary play-btn" data-task-id="{{ task.id }}" title="Start">
+                          <i class="bi bi-play-fill"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary pause-btn d-none" data-task-id="{{ task.id }}" title="Pause">
+                          <i class="bi bi-pause-fill"></i>
+                        </button>
+                        <span class="ms-1 fw-semibold timer-display" data-task-id="{{ task.id }}">00:00:00</span>
+                      </div>
+                    </td>
+                    <td class="text-end">
+                      <div class="btn-group" role="group">
+                        <a href="{{ url_for('edit_task', task_id=task.id) }}" class="btn btn-sm btn-outline-secondary" title="Edit">
+                          <i class="bi bi-pencil"></i>
+                        </a>
+                        <form method="post" action="{{ url_for('delete_task', task_id=task.id) }}"
+                              style="display:inline-block;" onsubmit="return confirm('Delete this task?');">
+                          <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                            <i class="bi bi-trash"></i>
+                          </button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer>
+    <p>&copy; 2025 Task Manager. All rights reserved.</p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- Idle-aware, monotonic timer client -->
+  <script>
+  (function() {
+    // --- Config ---
+    const PING_MS = 10000;          // sync every 10s
+    const IDLE_MINUTES = 10;        // auto-pause after 10 min of no activity in this tab
+
+    // --- State ---
+    let currentTaskId = null;
+    let totalSeconds = 0;     // authoritative baseline from server
+    let visualSeconds = 0;    // displayed seconds; never decreases
+    let tickTimer = null;
+    let activitySincePing = false;
+    let lastActivityAt = Date.now();
+
+    // Track activity inside this tab
+    ['mousemove','keydown','click','wheel','touchstart'].forEach(evt => {
+      window.addEventListener(evt, () => {
+        activitySincePing = true;
+        lastActivityAt = Date.now();
+      }, {passive:true});
+    });
+
+    function fmtHMS(sec) {
+      sec = Math.max(0, parseInt(sec || 0, 10));
+      const h = String(Math.floor(sec / 3600)).padStart(2,'0');
+      const m = String(Math.floor((sec % 3600)/60)).padStart(2,'0');
+      const s = String(sec % 60).padStart(2,'0');
+      return `${h}:${m}:${s}`;
+    }
+
+    function renderDisplays() {
+      document.querySelectorAll('.timer-display').forEach(el => {
+        const tid = parseInt(el.dataset.taskId, 10);
+        el.textContent = (currentTaskId && tid === currentTaskId) ? fmtHMS(visualSeconds) : el.textContent;
+      });
+    }
+
+    function setButtons(taskId, running) {
+      document.querySelectorAll('.play-btn').forEach(b=>{
+        const tid = parseInt(b.dataset.taskId, 10);
+        b.classList.toggle('d-none', running && tid === taskId);
+      });
+      document.querySelectorAll('.pause-btn').forEach(b=>{
+        const tid = parseInt(b.dataset.taskId, 10);
+        b.classList.toggle('d-none', !(running && tid === taskId));
+      });
+    }
+
+    function startLocalTick() {
+      if (tickTimer) clearInterval(tickTimer);
+      tickTimer = setInterval(() => {
+        if (!currentTaskId) return;
+        // advance visual clock, never below server baseline
+        visualSeconds = Math.max(visualSeconds + 1, totalSeconds);
+        renderDisplays();
+
+        // auto-pause if idle too long
+        if (Date.now() - lastActivityAt > IDLE_MINUTES * 60 * 1000) {
+          pauseTimer('idle');
+        }
+      }, 1000);
+    }
+
+    async function startTimer(taskId) {
+      try {
+        const res = await fetch("{{ url_for('timer_start') }}", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({task_id: taskId})
+        });
+        const data = await res.json();
+        if (data.ok) {
+          currentTaskId = taskId;
+          activitySincePing = true;
+          lastActivityAt = Date.now();
+
+          totalSeconds = data.total_seconds || 0;
+          visualSeconds = Math.max(visualSeconds, totalSeconds);
+          setButtons(taskId, true);
+          startLocalTick();
+          renderDisplays();
+        } else {
+          alert(data.error || "Unable to start timer.");
+        }
+      } catch(e) {
+        console.error(e); alert("Network error starting timer.");
+      }
+    }
+
+    async function pauseTimer(reason) {
+      try {
+        const res = await fetch("{{ url_for('timer_pause') }}", { method: "POST" });
+        const data = await res.json();
+        setButtons(currentTaskId, false);
+        if (tickTimer) clearInterval(tickTimer);
+        if (data.ok) {
+          totalSeconds = Math.max(totalSeconds, data.total_seconds || 0);
+          visualSeconds = Math.max(visualSeconds, totalSeconds);
+          renderDisplays();
+          if (data.hours_added && data.hours_added > 0) {
+            console.log(`Timesheet updated: +${data.hours_added} hours${reason ? " ("+reason+")" : ""}`);
+          }
+        }
+        currentTaskId = null;
+      } catch(e) {
+        console.error(e);
+        if (reason !== 'idle') alert("Network error pausing timer.");
+        currentTaskId = null;
+      }
+    }
+
+    // Button handlers
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.play-btn')) {
+        const btn = e.target.closest('.play-btn');
+        const taskId = parseInt(btn.dataset.taskId, 10);
+        startTimer(taskId);
+      }
+      if (e.target.closest('.pause-btn')) {
+        pauseTimer();
+      }
+    });
+
+    // Background pings — credit time server-side only if activity occurred since last ping
+    setInterval(async () => {
+      try {
+        const res = await fetch("{{ url_for('timer_ping') }}", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({activity: activitySincePing})
+        });
+        activitySincePing = false;
+        const data = await res.json();
+
+        if (data.running) {
+          currentTaskId = data.task_id;
+          totalSeconds = Math.max(totalSeconds, data.total_seconds || 0);
+          visualSeconds = Math.max(visualSeconds, totalSeconds);
+          setButtons(currentTaskId, true);
+        } else {
+          if (tickTimer) clearInterval(tickTimer);
+          setButtons(currentTaskId, false);
+          currentTaskId = null;
+        }
+        renderDisplays();
+      } catch(e) {
+        console.warn("Ping failed", e);
+      }
+    }, PING_MS);
+
+    // Keep timer across reloads, without going backwards
+    (async function bootstrap(){
+      try {
+        const res = await fetch("{{ url_for('timer_status') }}");
+        const data = await res.json();
+        if (data.running) {
+          currentTaskId = data.task_id;
+          totalSeconds = Math.max(0, data.total_seconds || 0);
+          visualSeconds = Math.max(visualSeconds, totalSeconds);
+          setButtons(currentTaskId, true);
+          startLocalTick();
+          renderDisplays();
+        }
+      } catch(e){ console.warn(e); }
+    })();
+
+    // Ensure session writes to timesheet if tab closes
+    window.addEventListener('beforeunload', function() {
+      if (!currentTaskId) return;
+      try {
+        const url = "{{ url_for('timer_pause') }}";
+        const blob = new Blob([JSON.stringify({reason: 'unload'})], {type: 'application/json'});
+        navigator.sendBeacon(url, blob);
+      } catch(_) {}
+    });
+  })();
+  </script>
+</body>
+</html>

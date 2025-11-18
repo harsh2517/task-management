@@ -1,0 +1,49 @@
+<div class="container mt-4">
+    <h3>Manage Users</h3>
+    <form method="POST">
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    <th>Username</th>
+                    <th>Current Role</th>
+                    <th>Manager</th>
+                    <th>New Role</th>
+                    <th>Assign Manager</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.username }}</td>
+                    <td>{{ user.role }}</td>
+                    <td>
+                        {% if user.manager_id %}
+                            {{ users|selectattr('id', 'equalto', user.manager_id)|map(attribute='username')|first }}
+                        {% else %} - {% endif %}
+                    </td>
+                    <td>
+                        <select name="role" class="form-select">
+                            <option value="user" {% if user.role == "user" %}selected{% endif %}>User</option>
+                            <option value="manager" {% if user.role == "manager" %}selected{% endif %}>Manager</option>
+                            <option value="admin" {% if user.role == "admin" %}selected{% endif %}>Admin</option>
+                        </select>
+                    </td>
+                    <td>
+                        <select name="manager_id" class="form-select">
+                            <option value="">None</option>
+                            {% for m in managers %}
+                            <option value="{{ m.id }}" {% if user.manager_id == m.id %}selected{% endif %}>{{ m.username }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td>
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <button type="submit" class="btn btn-sm btn-primary">Update</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </form>
+</div>

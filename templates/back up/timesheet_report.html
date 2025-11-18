@@ -1,0 +1,49 @@
+<div class="container mt-4">
+    <h3>Time Sheet Report</h3>
+    <form method="POST" class="row g-3 mb-4">
+        <div class="col-md-4">
+            <label class="form-label">User</label>
+            <select name="user_id" class="form-select">
+                <option value="">All Users</option>
+                {% for user in users %}
+                <option value="{{ user.id }}" {% if selected_user == user.id|string %}selected{% endif %}>{{ user.username }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Start Date</label>
+            <input type="date" name="start_date" class="form-control" value="{{ start_date }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">End Date</label>
+            <input type="date" name="end_date" class="form-control" value="{{ end_date }}">
+        </div>
+        <div class="col-md-2 align-self-end">
+            <button class="btn btn-primary">Generate</button>
+        </div>
+    </form>
+
+    {% if logs %}
+    <form method="POST" action="{{ url_for('export_timesheet') }}">
+        <input type="hidden" name="user_id" value="{{ selected_user }}">
+        <input type="hidden" name="start_date" value="{{ start_date }}">
+        <input type="hidden" name="end_date" value="{{ end_date }}">
+        <button class="btn btn-outline-info mb-3">Export Excel</button>
+    </form>
+
+    <table class="table table-bordered">
+        <thead><tr><th>Date</th><th>User</th><th>Task</th><th>Hours</th><th>Notes</th></tr></thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td>{{ log.date }}</td>
+                <td>{{ log.user.username }}</td>
+                <td>{{ log.task.title }}</td>
+                <td>{{ log.hours }}</td>
+                <td>{{ log.notes }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>

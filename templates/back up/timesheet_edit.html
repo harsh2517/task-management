@@ -1,0 +1,27 @@
+<div class="container mt-4">
+    <h3>Edit Time Log</h3>
+    <form method="POST">
+        <div class="mb-3">
+            <label class="form-label">Task</label>
+            <select name="task_id" class="form-select" required>
+                {% for task in tasks %}
+                <option value="{{ task.id }}" {% if log.task_id == task.id %}selected{% endif %}>{{ task.title }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Date</label>
+            <input type="date" name="date" value="{{ log.date }}" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Hours</label>
+            <input type="number" step="0.1" name="hours" value="{{ log.hours }}" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Notes</label>
+            <input type="text" name="notes" value="{{ log.notes }}" class="form-control">
+        </div>
+        <button class="btn btn-primary">Update</button>
+        <a href="{{ url_for('timesheet') }}" class="btn btn-secondary">Cancel</a>
+    </form>
+</div>

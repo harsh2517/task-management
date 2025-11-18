@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-light bg-light">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="{{ url_for('dashboard') }}">TaskManager</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navMenu">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link active" href="{{ url_for('dashboard') }}">Dashboard</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('list_projects') }}">Project</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('manage_users') }}">Users</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container my-4">
+    <div class="row">
+
+      <!-- Create Task Form -->
+      <div class="col-md-4">
+        <div class="card shadow-sm mb-4">
+          <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Create Task</h5>
+          </div>
+          <div class="card-body">
+            <form method="post" action="{{ url_for('dashboard') }}">
+              <div class="mb-3">
+                <label for="title" class="form-label">Title</label>
+                <input type="text" class="form-control" id="title" name="title" required>
+              </div>
+              <div class="mb-3">
+                <label for="priority" class="form-label">Priority</label>
+                <select class="form-select" id="priority" name="priority">
+                  <option value="Low">Low</option>
+                  <option value="Medium" selected>Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="deadline" class="form-label">Deadline</label>
+                <input type="date" class="form-control" id="deadline" name="deadline">
+              </div>
+              <div class="mb-3">
+                <label for="assigned_to" class="form-label">Assign To</label>
+                <select class="form-select" id="assigned_to" name="assigned_to">
+                  {% for user in users %}
+                    <option value="{{ user.id }}">{{ user.username }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="project_id" class="form-label">Project</label>
+                <select class="form-select" id="project_id" name="project_id">
+                  <option value="">–– None ––</option>
+                  {% for project in projects %}
+                    <option value="{{ project.id }}">{{ project.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <button type="submit" class="btn btn-primary w-100">Add Task</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tasks Table & Timesheet Summary -->
+      <div class="col-md-8">
+        <div class="card shadow-sm mb-4">
+          <div class="card-header bg-secondary text-white d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">All Tasks</h5>
+            <a href="{{ url_for('export_tasks') }}" class="btn btn-success btn-sm">
+              <i class="bi bi-download"></i> Export Tasks
+            </a>
+          </div>
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-striped table-hover mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th>Title</th>
+                    <th>Priority</th>
+                    <th>Deadline</th>
+                    <th>Project</th>
+                    <th>Assigned To</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for task in tasks %}
+                    <tr>
+                      <td>{{ task.title }}</td>
+                      <td>{{ task.priority }}</td>
+                      <td>{{ task.deadline.strftime('%Y-%m-%d') if task.deadline else '—' }}</td>
+                      <td>{{ task.project.name if task.project else '—' }}</td>
+                      <td>{{ task.assigned_user.username if task.assigned_user else '—' }}</td>
+                      <td>{{ task.status }}</td>
+                      <td class="text-end">
+                        <form method="post" action="{{ url_for('update_task_status', task_id=task.id) }}" class="d-inline">
+                          <select name="status" class="form-select form-select-sm d-inline-block w-auto">
+                            {% for s in ['To Do','In Progress','Done'] %}
+                              <option value="{{ s }}" {% if task.status == s %}selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                          </select>
+                          <button type="submit" class="btn btn-sm btn-outline-primary">Update</button>
+                        </form>
+                        <a href="{{ url_for('edit_task', task_id=task.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+                        <a href="{{ url_for('delete_task', task_id=task.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this task?');">Delete</a>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Weekly Timesheet Summary -->
+        <div class="card shadow-sm">
+          <div class="card-body text-center">
+            <h6 class="card-title">Your Hours This Week</h6>
+            <p class="display-6">{{ total_hours }}h</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap 5 JS & Icons -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Optionally include Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+</body>
+</html>

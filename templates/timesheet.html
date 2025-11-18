@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Timesheet</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+</head>
+<body>
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="{{ url_for('dashboard') }}">TaskManager</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navMenu">
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('list_projects') }}">Projects</a></li>
+                <li class="nav-item"><a class="nav-link active" href="{{ url_for('timesheet') }}">My Timesheet</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('manage_users') }}">Users</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('timesheet_report') }}">Timesheet Report</a></li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container my-4">
+    <div class="row">
+        <div class="col-lg-4">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <h5>Log Time</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <div class="mb-3">
+                            <label class="form-label">Task</label>
+                            <select name="task_id" class="form-select" required>
+                                {% for task in tasks %}
+                                <option value="{{ task.id }}">{{ task.title }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Date</label>
+                            <input type="date" name="date" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Hours</label>
+                            <input type="number" step="0.1" name="hours" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Notes</label>
+                            <input type="text" name="notes" class="form-control">
+                        </div>
+                        <button class="btn btn-primary w-100">Log Time</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-header">
+                    <h5>My Time Logs</h5>
+                </div>
+                <div class="card-body p-0">
+                     <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead><tr><th>Date</th><th>Task</th><th>Hours</th><th>Notes</th><th></th></tr></thead>
+                            <tbody>
+                            {% for log in logs %}
+                            <tr>
+                                <td>{{ log.date.strftime('%Y-%m-%d') }}</td>
+                                <td>{{ log.task.title }}</td>
+                                <td>{{ log.hours }}h</td>
+                                <td>{{ log.notes }}</td>
+                                <td class="text-end">
+                                    <div class="btn-group">
+                                        <a href="{{ url_for('timesheet_edit', log_id=log.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+                                        <a href="{{ url_for('timesheet_delete', log_id=log.id) }}" class="btn btn-sm btn-outline-danger"
+                                           onclick="return confirm('Are you sure you want to delete this log?')"><i class="bi bi-trash"></i></a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
