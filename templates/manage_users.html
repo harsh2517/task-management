@@ -38,6 +38,10 @@
     <div class="card shadow-sm">
         <div class="card-header">
             <h3>Manage Users</h3>
+            {% if current_user.role == 'admin' %}
+                 <a href="{{ url_for('register') }}" class="btn btn-success mb-3">+ Add User</a>
+            {% endif %}
+
         </div>
         <div class="card-body">
             <div class="table-responsive">
@@ -45,6 +49,7 @@
                     <thead>
                         <tr>
                             <th>Username</th>
+                            <th>Email</th>
                             <th>Current Role</th>
                             <th>Manager</th>
                             <th>Change Role</th>
@@ -57,6 +62,7 @@
                         {% set mgr = managers|selectattr('id', 'equalto', user.manager_id)|first %}
                         <tr>
                             <td>{{ user.username }}</td>
+                            <td>{{ user.email }}</td>
                             <td><span class="badge bg-info">{{ user.role }}</span></td>
                             <td>{{ mgr.username if mgr else '-' }}</td>
 
@@ -118,6 +124,11 @@
                                     <label class="form-label">Username</label>
                                     <input type="text" name="username" value="{{ user.username }}" class="form-control" required>
                                   </div>
+                                  <div class="mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" name="email" value="{{ user.email or '' }}" class="form-control" required>
+                                </div>
+
                                   <!-- You can optionally allow role/manager edit here too
                                        by adding the same selects. Keeping it simple: rename only. -->
                                 </div>

@@ -75,6 +75,7 @@ class User(db.Model, UserMixin):
     __tablename__ = 'user'
     id         = db.Column(db.Integer, primary_key=True)
     username   = db.Column(db.String(100), unique=True, nullable=False)
+    email      = db.Column(db.String(150), unique=True, nullable=True)
     password   = db.Column(db.String(200), nullable=False)
     role       = db.Column(db.String(20), default='user')  # admin, manager, user
     manager_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -294,12 +295,37 @@ def index():
 # -- AUTH --
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+
+      # Only admin can access
+    # if current_user.role != 'admin':
+    #     flash("Only admins can create new users!", "danger")
+    #     return redirect(url_for('manage_users'))
+    
     if request.method == 'POST':
-        username = request.form['username']
+        username = (request.form.get('username') or "").strip()
+        email    = (request.form.get('email') or "").strip().lower()
         password = bcrypt.generate_password_hash(
             request.form['password']
         ).decode('utf-8')
         company_choice = request.form['company_choice']
+
+        # basic email validation
+        if not email:
+            flash("Please enter an email address.", "danger")
+            return render_template('register.html')
+        if "@" not in email or "." not in email:
+            flash("Please enter a valid email address.", "danger")
+            return render_template('register.html')
+
+        # check email uniqueness
+        if User.query.filter_by(email=email).first():
+            flash("Email already taken. Try logging in or use another email.", "danger")
+            return render_template('register.html')
+
+        # check username uniqueness too
+        if User.query.filter_by(username=username).first():
+            flash("Username already taken.", "danger")
+            return render_template('register.html')
 
         if company_choice == "create":
             company_name = request.form['company_name']
@@ -309,6 +335,7 @@ def register():
             db.session.flush()
             user = User(
                 username=username,
+                email=email,
                 password=password,
                 company_id=company.id,
                 role="admin"
@@ -321,6 +348,7 @@ def register():
                 return render_template('register.html')
             user = User(
                 username=username,
+                email=email,
                 password=password,
                 company_id=company.id,
                 role="user"
@@ -334,37 +362,38 @@ def register():
     return render_template('register.html')
 
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        user = User.query.filter_by(
-            username=request.form['username']
-        ).first()
-        if user and bcrypt.check_password_hash(
-            user.password, request.form['password']
-        ):
+        email = (request.form.get('email') or "").strip().lower()
+        password = request.form.get('password') or ""
+
+        user = User.query.filter_by(email=email).first()
+        if user and bcrypt.check_password_hash(user.password, password):
             login_user(user)
             return redirect(url_for('dashboard'))
-        flash('Login failed! Check username & password.', 'danger')
+        flash('Login failed! Check email & password.', 'danger')
 
     return render_template('login.html')
+
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
     data = request.get_json(force=True)
-    username = (data.get('username') or '').strip()
+    email = (data.get('email') or '').strip().lower()
     password = data.get('password') or ''
 
-    user = User.query.filter_by(username=username).first()
+    user = User.query.filter_by(email=email).first()
     if not user or not verify_password(user.password, password):
         return jsonify({"msg": "bad credentials"}), 401
 
-    # IMPORTANT: identity must be a STRING; put company_id in additional claims
     token = create_access_token(
         identity=str(user.id),
         additional_claims={"company_id": user.company_id}
     )
     return jsonify({"access_token": token})
+
 
 
 @app.route('/logout')
@@ -416,6 +445,168 @@ def api_me_tasks():
             "status": t.status
         })
     return jsonify(items)
+
+# -- ADMIN_DASHBOARD --
+
+from datetime import timezone, timedelta, datetime
+IST = timezone(timedelta(hours=5, minutes=30))
+
+MAX_HOURS_PER_DAY = 8
+
+@app.route('/admin-dashboard')
+@login_required
+def admin_dashboard():
+    if current_user.role != 'admin':
+        return redirect(url_for('dashboard'))
+
+    users = User.query.filter_by(company_id=current_user.company_id).all()
+    report = []
+
+    # Start of today in UTC
+    start_of_today_utc = datetime.now(IST).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    for u in users:
+
+        # -------------------------
+        # Task estimates
+        # -------------------------
+        estimated = (
+            db.session.query(db.func.sum(Task.estimated_hours))
+            .filter(Task.assigned_to == u.id)
+            .scalar()
+            or 0
+        )
+
+        worked_done = (
+            db.session.query(db.func.sum(Task.estimated_hours))
+            .filter(Task.assigned_to == u.id, Task.status == 'Done')
+            .scalar()
+            or 0
+        )
+
+        remaining = estimated - worked_done
+
+        # -------------------------
+        # First time entry today
+        # -------------------------
+        first_entry = (
+            db.session.query(TimeEntry.started_at)
+            .filter(
+                TimeEntry.user_id == u.id,     # FIXED
+                TimeEntry.started_at >= start_of_today_utc
+            )
+            .order_by(TimeEntry.started_at.asc())
+            .first()
+        )
+
+        print(f"first_entry raw: {first_entry}")
+
+        # Convert to datetime (UTC)
+        if first_entry:
+            first_start = first_entry[0]
+
+            # if DB stores naive datetime → convert to UTC
+            if first_start.tzinfo is None:
+                first_start = first_start.replace(tzinfo=timezone.utc)
+        else:
+            first_start = None
+
+        # -------------------------
+        # Max working end today
+        # -------------------------
+        if first_start:
+            max_end_today = first_start + timedelta(hours=MAX_HOURS_PER_DAY)
+        else:
+            # No work done today → allow full window
+            max_end_today = start_of_today_utc + timedelta(hours=MAX_HOURS_PER_DAY)
+
+        # -------------------------
+        # Total worked today
+        # -------------------------
+        total_work_sec_today = (
+            db.session.query(db.func.sum(TimeEntry.active_seconds))
+            .filter(
+                TimeEntry.user_id == u.id,
+                TimeEntry.started_at >= start_of_today_utc
+            )
+            .scalar()
+            or 0
+        )
+
+        total_work_hr_today = total_work_sec_today / 3600
+
+        # -------------------------
+        # Remaining time today
+        # -------------------------
+
+        now = datetime.now(timezone.utc)
+        remaining_time_today_hr = max(
+            0, (max_end_today - now).total_seconds() / 3600
+        )
+
+        free_hours_today_hr = max(0, remaining - total_work_hr_today)
+
+        
+        free_hours_today = abs(remaining_time_today_hr - free_hours_today_hr)
+
+
+        progress = round((worked_done / estimated) * 100, 2) if estimated > 0 else 0
+
+        # -------------------------
+        # Debug prints
+        # -------------------------
+        print("--------------------------------------------------")
+        print(f"User: {u.username} (ID: {u.id})")
+        print(f"Estimated: {estimated}")
+        print(f"Worked Done: {worked_done}")
+        print(f"Remaining: {remaining}")
+        print(f"First Start: {first_start}")
+        print(f"Max End Today: {max_end_today}")
+        print(f"Worked Today Sec: {total_work_sec_today}")
+        print(f"Worked Today Hr: {total_work_hr_today}")
+        print(f"Remaining Today Hr: {remaining_time_today_hr}")
+        print(f"free_hours_today_hr: {free_hours_today_hr}")
+        print(f"Free Hours Today: {free_hours_today}")
+        print(f"Now UTC: {now}")
+        print("--------------------------------------------------")
+
+        report.append({
+            "user": u,
+            "estimated": round(estimated, 2),
+            "worked": round(worked_done, 2),
+            "remaining": round(remaining, 2),
+            "progress": progress,
+            "free_hours_today": round(free_hours_today, 2),
+        })
+
+    # -------------------------
+    # Project hours for pie chart
+    # -------------------------
+    project_data = (
+        db.session.query(
+            Project.name,
+            db.func.sum(Task.estimated_hours)
+        )
+        .join(Task, Task.project_id == Project.id)
+        .filter(Task.status == 'Done')
+        .filter(Project.company_id == current_user.company_id)
+        .group_by(Project.name)
+        .all()
+    )
+
+    labels = [row[0] for row in project_data]
+    data = [row[1] for row in project_data]
+
+    return render_template(
+        'admin_dashboard.html',
+        report=report,
+        labels=labels,
+        data=data
+    )
+
+
 
 # -- DASHBOARD & TASK CREATION --
 @app.route('/dashboard', methods=['GET', 'POST'])
@@ -536,27 +727,63 @@ def dashboard():
     )
 
 
+
 # -- TASK OPERATIONS --
 @app.route('/update_task_status/<int:task_id>', methods=['POST'])
 @login_required
 def update_task_status(task_id):
     task = Task.query.get_or_404(task_id)
+    new_status = request.form.get("status")
 
-    # permission checks
+    if task.status == "Done" and new_status != "Done":
+        flash("Task is already completed. You cannot update it.", "danger")
+        return redirect(url_for('dashboard'))
+
+    # Permission checks
     if current_user.role == "user" and task.assigned_to != current_user.id:
         abort(403)
     if current_user.role == "manager":
-        team_ids = [u.id for u in User.query.filter_by(
-            manager_id=current_user.id
-        ).all()]
+        team_ids = [u.id for u in User.query.filter_by(manager_id=current_user.id).all()]
         if task.assigned_to not in team_ids + [current_user.id]:
             abort(403)
 
     task.status = request.form['status']
+
+    # If DONE → auto-adjust time
+    if request.form['status'] == 'Done':
+
+        total_active_seconds = (
+            db.session.query(db.func.sum(TimeEntry.active_seconds))
+            .filter(TimeEntry.task_id == task.id)
+            .scalar() or 0
+        )
+
+        estimated_seconds = (task.estimated_hours or 0) * 3600
+
+        print("---- TASK DONE AUTO TIME FIX ----")
+        print("Estimated Seconds:", estimated_seconds)
+        print("Active Seconds:", total_active_seconds)
+
+        if estimated_seconds > total_active_seconds:
+            missing_seconds = estimated_seconds - total_active_seconds
+            now = datetime.utcnow()
+
+            new_entry = TimeEntry(
+                user_id=task.assigned_to,
+                task_id=task.id,
+                company_id=task.company_id,
+                started_at=now,
+                paused_at=now,
+                last_ping_at=now,
+                active_seconds=missing_seconds,
+                is_running=False
+            )
+            db.session.add(new_entry)
+            print("Inserted missing entry:", missing_seconds)
+
     db.session.commit()
     flash("Task status updated", "success")
     return redirect(url_for('dashboard'))
-
 
 @app.route('/delete_task/<int:task_id>', methods=['POST'])
 @login_required
@@ -918,7 +1145,7 @@ def update_user(user_id):
         flash('Unauthorized access.', 'danger')
         return redirect(url_for('manage_users'))
 
-    # Optional rename
+      # Optional rename
     new_username = (request.form.get('username') or "").strip()
     if new_username and new_username != user.username:
         exists = User.query.filter(User.username == new_username, User.id != user.id).first()
@@ -926,6 +1153,20 @@ def update_user(user_id):
             flash('Username already taken.', 'danger')
             return redirect(url_for('manage_users'))
         user.username = new_username
+
+    # Optional email update
+    new_email = (request.form.get('email') or "").strip().lower()
+    if new_email and new_email != (user.email or ""):
+        # basic check
+        if "@" not in new_email:
+            flash('Please enter a valid email.', 'danger')
+            return redirect(url_for('manage_users'))
+        exists = User.query.filter(User.email == new_email, User.id != user.id).first()
+        if exists:
+            flash('Email already taken.', 'danger')
+            return redirect(url_for('manage_users'))
+        user.email = new_email
+
 
     # Role change
     new_role = request.form.get('role')
