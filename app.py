@@ -75,7 +75,7 @@ class User(db.Model, UserMixin):
     __tablename__ = 'user'
     id         = db.Column(db.Integer, primary_key=True)
     username   = db.Column(db.String(100), unique=True, nullable=False)
-    email      = db.Column(db.String(150), unique=True, nullable=True)
+    email      = db.Column(db.String(150), unique=True, nullable=False)
     password   = db.Column(db.String(200), nullable=False)
     role       = db.Column(db.String(20), default='user')  # admin, manager, user
     manager_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -366,16 +366,22 @@ def register():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        email = (request.form.get('email') or "").strip().lower()
+        identifier = (request.form.get('identifier') or "").strip()
         password = request.form.get('password') or ""
 
-        user = User.query.filter_by(email=email).first()
+        # Try to find user by email or username
+        user = User.query.filter(
+            (User.email == identifier.lower()) | (User.username == identifier)
+        ).first()
+
         if user and bcrypt.check_password_hash(user.password, password):
             login_user(user)
             return redirect(url_for('dashboard'))
-        flash('Login failed! Check email & password.', 'danger')
+
+        flash('Login failed! Check your username/email & password.', 'danger')
 
     return render_template('login.html')
+
 
 
 @app.route('/api/login', methods=['POST'])
@@ -549,8 +555,8 @@ def admin_dashboard():
         free_hours_today_hr = max(0, remaining - total_work_hr_today)
 
         
-        free_hours_today = abs(remaining_time_today_hr - free_hours_today_hr)
-
+        # free_hours_today = abs(remaining_time_today_hr - free_hours_today_hr)
+        free_hours_today =   max(0, 8 - remaining)
 
         progress = round((worked_done / estimated) * 100, 2) if estimated > 0 else 0
 
@@ -606,6 +612,18 @@ def admin_dashboard():
         data=data
     )
 
+
+# Route to view tasks assigned to a particular user
+@app.route('/admin/user/<int:user_id>/tasks')
+@login_required
+def admin_user_tasks(user_id):
+    if current_user.role != 'admin':
+        flash("Access denied.", "danger")
+        return redirect(url_for('dashboard'))
+
+    user = User.query.get_or_404(user_id)
+    tasks = Task.query.filter_by(assigned_to=user.id).all()
+    return render_template('admin_user_tasks.html', user=user, tasks=tasks)
 
 
 # -- DASHBOARD & TASK CREATION --
@@ -735,9 +753,9 @@ def update_task_status(task_id):
     task = Task.query.get_or_404(task_id)
     new_status = request.form.get("status")
 
-    if task.status == "Done" and new_status != "Done":
-        flash("Task is already completed. You cannot update it.", "danger")
-        return redirect(url_for('dashboard'))
+    # if task.status == "Done" and new_status != "Done":
+    #     flash("Task is already completed. You cannot update it.", "danger")
+    #     return redirect(url_for('dashboard'))
 
     # Permission checks
     if current_user.role == "user" and task.assigned_to != current_user.id:
@@ -1236,6 +1254,14 @@ def list_projects():
     projects = Project.query.filter_by(company_id=current_user.company_id).all()
     return render_template('projects.html', projects=projects)
 
+# Read-only Projects for normal users
+@app.route('/projects_view')
+@login_required
+def view_projects():
+    projects = Project.query.filter_by(company_id=current_user.company_id).all()
+    return render_template('projects_view.html', projects=projects)
+
+
 
 @app.route('/projects/create', methods=['GET', 'POST'])
 @login_required
@@ -1335,6 +1361,39 @@ def change_password():
         return redirect(url_for('logout'))
 
     return render_template('change_password.html')
+
+@app.route('/email_page', methods=['GET'])
+@auth_either
+def email_page():
+    return render_template("email.html")
+
+from flask import flash, redirect, url_for
+
+@app.route('/update_email', methods=['POST'])
+@auth_either
+def update_my_email():
+    actor = current_actor()
+    new_email = (request.form.get('email') or '').strip().lower()
+
+    # Basic validations
+    if not new_email:
+        flash("Email cannot be empty", "error")
+        return redirect(url_for('email_page'))
+    if "@" not in new_email or "." not in new_email:
+        flash("Invalid email address", "error")
+        return redirect(url_for('email_page'))
+
+    # Check uniqueness
+    if User.query.filter(User.email == new_email, User.id != actor.id).first():
+        flash("Email already in use", "error")
+        return redirect(url_for('email_page'))
+
+    # Update email
+    actor.email = new_email
+    db.session.commit()
+
+    flash("Email updated successfully", "success")
+    return redirect(url_for('dashboard'))
 
 
 # -------------------- MAIN ENTRY -------------------- #
