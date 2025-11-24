@@ -40,6 +40,7 @@
                         <th>Title</th>
                         <th>Priority</th>
                         <th>Project</th>
+                        <th>Work Start</th>
                         <th>Deadline</th>
                         <th>Status</th>
                         <th>Estimated Hours</th>
@@ -59,7 +60,10 @@
                                 </span>
                             </td>
                             <td>{{ task.project.name if task.project else '—' }}</td>
+                             <td>{{ task.work_start.strftime('%Y-%m-%d') if task.work_start else '—' }}</td>
+                
                             <td>{{ task.deadline.strftime('%Y-%m-%d') if task.deadline else '—' }}</td>
+                           
                             <td>{{ task.status }}</td>
                             <td>{{ task.estimated_hours or 0 }}</td>
                         </tr>

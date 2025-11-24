@@ -19,7 +19,6 @@
         <ul class="navbar-nav ms-auto">
           <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
           <li class="nav-item"><a class="nav-link active" href="{{ url_for('list_projects') }}">Projects</a></li>
-           <!-- <li class="nav-item"><a class="nav-link" href="{{ url_for('timesheet') }}">My Timesheet</a></li> -->
           <li class="nav-item"><a class="nav-link" href="{{ url_for('manage_users') }}">Users</a></li>
           <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
         </ul>
@@ -29,28 +28,37 @@
 
   <div class="container my-4">
     <div class="card shadow-sm">
-        <div class="card-header bg-light d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Projects</h5>
-            <a href="{{ url_for('create_project') }}" class="btn btn-primary">
-                <i class="bi bi-plus-lg"></i> New Project
-            </a>
-        </div>
-        <div class="card-body">
-            {% if projects %}
-                <div class="list-group">
-                    {% for project in projects %}
-                      <div class="list-group-item d-flex justify-content-between align-items-center">
-                        {{ project.name }}
-                        <!-- you can add edit/delete buttons here -->
-                      </div>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="text-center p-4">
-                    <p class="text-muted">No projects yet. Create one to get started.</p>
-                </div>
-            {% endif %}
-        </div>
+      <div class="card-header bg-light d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Projects</h5>
+          <a href="{{ url_for('create_project') }}" class="btn btn-primary">
+              <i class="bi bi-plus-lg"></i> New Project
+          </a>
+      </div>
+
+      <div class="card-body">
+        {% if projects %}
+          <div class="list-group">
+              {% for project, member_count in projects %}
+              <div class="list-group-item d-flex justify-content-between align-items-center">
+
+                  <!-- Project Name -->
+                  <span>{{ project.name }}</span>
+
+                  <!-- Members Badge (clickable) -->
+                  <a href="{{ url_for('project_members', project_id=project.id) }}" 
+                     class="badge bg-primary rounded-pill text-decoration-none">
+                      {{ member_count }} Members
+                  </a>
+
+              </div>
+              {% endfor %}
+          </div>
+        {% else %}
+          <div class="text-center p-4">
+              <p class="text-muted">No projects yet. Create one to get started.</p>
+          </div>
+        {% endif %}
+      </div>
     </div>
   </div>
 

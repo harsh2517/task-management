@@ -90,6 +90,11 @@ class Project(db.Model):
     company_id = db.Column(db.Integer, db.ForeignKey('company.id'), nullable=False)
     # backref 'tasks' added in Task
 
+    members = db.relationship('ProjectMember', backref='project', lazy='dynamic')
+
+from sqlalchemy.dialects.postgresql import ARRAY
+
+
 class Task(db.Model):
     __tablename__ = 'task'
     id          = db.Column(db.Integer, primary_key=True)
@@ -97,6 +102,7 @@ class Task(db.Model):
     status      = db.Column(db.String(50), default='To Do')
     priority    = db.Column(db.String(20), default='Medium')
     deadline    = db.Column(db.Date, nullable=True)
+    work_start = db.Column(db.Date, nullable=False,default ='0')
     estimated_hours = db.Column(db.Float)
 
     # who it’s assigned to
@@ -121,6 +127,14 @@ class Task(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=True)
     project    = db.relationship('Project', backref='tasks')
 
+    repeat_type = db.Column(db.String(20), default="none")
+    original_id = db.Column(db.Integer, db.ForeignKey('task.id'))  # <-- link to original
+    created_on = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)  # <--- important
+    deleted_dates = db.Column(ARRAY(db.Date), default=[])
+
+
+
+
 class TimeSheet(db.Model):
     __tablename__ = 'timesheet'
     id         = db.Column(db.Integer, primary_key=True)
@@ -143,7 +157,12 @@ class TimeEntry(db.Model):
     __tablename__ = 'time_entry'
     id               = db.Column(db.Integer, primary_key=True)
     user_id          = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    task_id          = db.Column(db.Integer, db.ForeignKey('task.id'), nullable=False)
+    # task_id          = db.Column(db.Integer, db.ForeignKey('task.id'), nullable=False)
+    task_id          = db.Column(
+                                        db.Integer,
+                                        db.ForeignKey('task.id', ondelete='CASCADE'),
+                                        nullable=False
+                                )
     company_id       = db.Column(db.Integer, db.ForeignKey('company.id'), nullable=False)
 
     started_at       = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -156,6 +175,28 @@ class TimeEntry(db.Model):
 
     user = db.relationship('User', backref='time_entries')
     task = db.relationship('Task', backref='time_entries')
+
+ # -------------------- COMMENT MODEL -------------------- #
+class TaskComment(db.Model):
+    __tablename__ = 'task_comment'
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('task.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
+    comment_text = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
+
+    user = db.relationship('User', backref=db.backref('comments', lazy='dynamic'))
+    task = db.relationship('Task', backref=db.backref('comments', lazy='dynamic'))
+
+class ProjectMember(db.Model):
+    __tablename__ = "project_member"
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=False)  # <-- fixed
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    user = db.relationship("User", backref="project_members")
+
+
 
 # -------------------- HELPERS -------------------- #
 def generate_invite_code():
@@ -288,6 +329,80 @@ def _finalize_running_entry(actor, *, post_timesheet: bool):
 
 
 # -------------------- ROUTES -------------------- #
+
+@app.route("/api/project/<int:project_id>/add_member", methods=["POST"])
+@login_required
+def api_add_project_member(project_id):
+    if current_user.role != "admin":
+        return jsonify({"error": "Unauthorized"}), 403
+
+    data = request.get_json()
+    user_id = data.get("user_id")
+    if not user_id:
+        return jsonify({"error": "Missing user_id"}), 400
+
+    # Check if project exists
+    project = Project.query.get_or_404(project_id)
+
+    # Check if member already exists
+    exists = ProjectMember.query.filter_by(project_id=project_id, user_id=user_id).first()
+    if exists:
+        return jsonify({"error": "Member already exists"}), 400
+
+    member = ProjectMember(project_id=project_id, user_id=user_id)
+    db.session.add(member)
+    db.session.commit()
+
+    return jsonify({"success": True, "message": "Member added successfully"})
+
+@app.route("/project/<int:project_id>/remove_member/<int:user_id>")
+@login_required
+def remove_project_member(project_id, user_id):
+    if current_user.role != "admin":
+        flash("Unauthorized", "danger")
+        return redirect(url_for("project_members", project_id=project_id))
+
+    member = ProjectMember.query.filter_by(project_id=project_id, user_id=user_id).first()
+    if member:
+        db.session.delete(member)
+        db.session.commit()
+        flash("Member removed successfully", "success")
+    else:
+        flash("Member not found", "danger")
+
+    return redirect(url_for("project_members", project_id=project_id))
+
+
+
+@app.route("/project/<int:project_id>/members", methods=["GET", "POST"])
+@login_required
+def project_members(project_id):
+    project = Project.query.get_or_404(project_id)
+
+    # all users that can be added
+    all_users = User.query.filter(User.role != "admin").all()
+
+    # get users already in project
+    existing_user_ids = [m.user_id for m in project.members]
+    available_users = [u for u in all_users if u.id not in existing_user_ids]
+
+    if request.method == "POST":
+        if current_user.role != "admin":
+            flash("Unauthorized", "danger")
+            return redirect(url_for("project_members", project_id=project_id))
+
+        user_id = request.form.get("user_id")
+        if user_id and int(user_id) not in existing_user_ids:
+            db.session.add(ProjectMember(project_id=project_id, user_id=int(user_id)))
+            db.session.commit()
+            flash("Member added", "success")
+        return redirect(url_for("project_members", project_id=project_id))
+
+    return render_template("project_member.html", project=project,
+                           existing_members=project.members,
+                           available_users=available_users)
+
+
 @app.route('/')
 def index():
     return render_template('landing.html', logged_in=current_user.is_authenticated)
@@ -400,6 +515,111 @@ def api_login():
     )
     return jsonify({"access_token": token})
 
+# -------------------- COMMENTS & TASK VIEW ROUTES -------------------- #
+
+@app.route('/task/<int:task_id>')
+@login_required
+def task_view(task_id):
+    task = Task.query.get_or_404(task_id)
+    # ensure same company
+    if task.company_id != current_user.company_id:
+        abort(403)
+    comments = TaskComment.query.filter_by(task_id=task.id).order_by(TaskComment.created_at.asc()).all()
+    users = User.query.filter_by(company_id=current_user.company_id).all()
+    projects = Project.query.filter_by(company_id=current_user.company_id).all()
+    return render_template('task_detail.html', task=task, comments=comments, users=users, projects=projects)
+
+
+@app.route('/task/<int:task_id>/comment', methods=['POST'])
+@auth_either
+def add_comment(task_id):
+    actor = current_actor()
+    if not actor:
+        return jsonify({"msg": "unauthorized"}), 401
+
+    task = Task.query.get_or_404(task_id)
+    if task.company_id != actor.company_id:
+        return jsonify({"msg":"forbidden"}), 403
+
+    text = (request.form.get('comment') or "").strip()
+    if not text:
+        flash("Comment cannot be empty.", "danger")
+        return redirect(url_for('task_view', task_id=task_id))
+
+    c = TaskComment(task_id=task.id, user_id=actor.id, comment_text=text)
+    db.session.add(c)
+    db.session.commit()
+    flash("Comment added.", "success")
+    return redirect(url_for('task_view', task_id=task_id))
+
+
+@app.route('/comment/<int:comment_id>/edit', methods=['POST'])
+@auth_either
+def edit_comment(comment_id):
+    actor = current_actor()
+    if not actor:
+        return jsonify({"msg":"unauthorized"}), 401
+
+    c = TaskComment.query.get_or_404(comment_id)
+    # owner or admin can edit
+    if c.user_id != actor.id and getattr(actor, "role", None) != "admin":
+        abort(403)
+
+    new_text = (request.form.get('comment') or "").strip()
+    if not new_text:
+        flash("Comment cannot be empty.", "danger")
+        return redirect(url_for('task_view', task_id=c.task_id))
+
+    c.comment_text = new_text
+    db.session.commit()
+    flash("Comment updated.", "success")
+    return redirect(url_for('task_view', task_id=c.task_id))
+
+
+@app.route('/comment/<int:comment_id>/delete', methods=['POST'])
+@auth_either
+def delete_comment(comment_id):
+    actor = current_actor()
+    if not actor:
+        return jsonify({"msg":"unauthorized"}), 401
+
+    c = TaskComment.query.get_or_404(comment_id)
+    # owner or admin can delete
+    if c.user_id != actor.id and getattr(actor, "role", None) != "admin":
+        abort(403)
+
+    task_id = c.task_id
+    db.session.delete(c)
+    db.session.commit()
+    flash("Comment deleted.", "warning")
+    return redirect(url_for('task_view', task_id=task_id))
+
+
+# Optional JSON endpoint for AJAX (if you want)
+@app.route('/task/<int:task_id>/comments', methods=['GET'])
+@auth_either
+def get_comments_for_task(task_id):
+    actor = current_actor()
+    if not actor:
+        return jsonify({"msg":"unauthorized"}), 401
+
+    task = Task.query.get_or_404(task_id)
+    if task.company_id != actor.company_id:
+        return jsonify({"msg":"forbidden"}), 403
+
+    comments = TaskComment.query.filter_by(task_id=task.id).order_by(TaskComment.created_at.asc()).all()
+    out = []
+    for c in comments:
+        out.append({
+            "id": c.id,
+            "task_id": c.task_id,
+            "user_id": c.user_id,
+            "username": c.user.username if c.user else None,
+            "comment_text": c.comment_text,
+            "created_at": c.created_at.isoformat(),
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None
+        })
+    return jsonify(out)
 
 
 @app.route('/logout')
@@ -453,10 +673,10 @@ def api_me_tasks():
     return jsonify(items)
 
 # -- ADMIN_DASHBOARD --
-
+from sqlalchemy import func
 from datetime import timezone, timedelta, datetime
 IST = timezone(timedelta(hours=5, minutes=30))
-
+from datetime import date
 MAX_HOURS_PER_DAY = 8
 
 @app.route('/admin-dashboard')
@@ -541,6 +761,20 @@ def admin_dashboard():
             or 0
         )
 
+           
+
+        estimated_today = (
+                db.session.query(func.sum(Task.estimated_hours))
+                .filter(
+                    Task.assigned_to == u.id,
+                    func.date(Task.work_start) == date.today(),
+                    Task.status != 'Done'
+                )
+                .scalar()
+                or 0
+            )
+
+
         total_work_hr_today = total_work_sec_today / 3600
 
         # -------------------------
@@ -556,7 +790,7 @@ def admin_dashboard():
 
         
         # free_hours_today = abs(remaining_time_today_hr - free_hours_today_hr)
-        free_hours_today =   max(0, 8 - remaining)
+        free_hours_today =   max(0, 8 - estimated_today)
 
         progress = round((worked_done / estimated) * 100, 2) if estimated > 0 else 0
 
@@ -575,6 +809,7 @@ def admin_dashboard():
         print(f"Remaining Today Hr: {remaining_time_today_hr}")
         print(f"free_hours_today_hr: {free_hours_today_hr}")
         print(f"Free Hours Today: {free_hours_today}")
+        print(f"estimated_today: {estimated_today}")
         print(f"Now UTC: {now}")
         print("--------------------------------------------------")
 
@@ -596,7 +831,7 @@ def admin_dashboard():
             db.func.sum(Task.estimated_hours)
         )
         .join(Task, Task.project_id == Project.id)
-        .filter(Task.status == 'Done')
+        .filter(Task.status != 'Done')
         .filter(Project.company_id == current_user.company_id)
         .group_by(Project.name)
         .all()
@@ -626,29 +861,114 @@ def admin_user_tasks(user_id):
     return render_template('admin_user_tasks.html', user=user, tasks=tasks)
 
 
+from datetime import datetime, date, timedelta
+from dateutil.relativedelta import relativedelta
+from sqlalchemy import func
+
+def generate_repeated_tasks():
+    today = date.today()
+
+    # Get all original repeatable tasks
+    tasks = Task.query.filter(Task.repeat_type != "none", Task.original_id == None).all()
+
+    # Build a set of original_ids that already have a repeated task today
+    # Compare only the date part
+    today_created_ids = set(
+        t.original_id for t in Task.query.filter(
+            Task.repeat_type != "none",
+            Task.original_id != None,
+            Task.company_id == current_user.company_id,
+            func.date(Task.created_on) == today
+        ).all()
+    )
+
+    for task in tasks:
+        # Skip if deleted today
+        if today in (task.deleted_dates or []):
+            continue
+
+        # Skip if a repeated task is already created today
+        if task.id in today_created_ids:
+            continue
+
+        # Determine if we should create based on repeat_type
+        should_create = False
+        new_work_start = today
+        new_deadline = task.deadline
+
+        if task.repeat_type == "daily":
+            should_create = True
+            if task.deadline:
+                new_deadline = task.deadline + timedelta(days=1)
+        elif task.repeat_type == "weekly":
+            if task.work_start and today.weekday() == task.work_start.weekday():
+                should_create = True
+                if task.deadline:
+                    new_deadline = task.deadline + timedelta(weeks=1)
+        elif task.repeat_type == "monthly":
+            if task.work_start and today.day == task.work_start.day:
+                should_create = True
+                if task.deadline:
+                    new_deadline = task.deadline + relativedelta(months=1)
+
+        # Create the repeated task if needed
+        if should_create:
+            clone = Task(
+                title=task.title,
+                priority=task.priority,
+                work_start=new_work_start,
+                deadline=new_deadline,
+                assigned_to=task.assigned_to,
+                project_id=task.project_id,
+                estimated_hours=task.estimated_hours,
+                repeat_type=task.repeat_type,
+                original_id=task.id,
+                user_id=task.user_id,
+                company_id=task.company_id,
+                created_on=datetime.utcnow()
+            )
+            db.session.add(clone)
+
+            # Immediately mark as created to prevent duplicates in the same request
+            today_created_ids.add(task.id)
+
+    db.session.commit()
+
+
 # -- DASHBOARD & TASK CREATION --
 @app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
 def dashboard():
+
+    generate_repeated_tasks()
+
     # ---- Create Task (POST) ----
     if request.method == 'POST':
         title       = request.form['title']
         priority    = request.form.get('priority', 'Medium')
         deadline_s  = request.form.get('deadline')
         deadline    = datetime.strptime(deadline_s, "%Y-%m-%d").date() if deadline_s else None
+        work_start_s   = request.form.get('work_start')          # << New
+        work_start     = datetime.strptime(work_start_s, "%Y-%m-%d").date() if work_start_s else None  # << New
         assigned_to = request.form.get('assigned_to') or None
         project_id  = request.form.get('project_id') or None
         est         = (request.form.get('estimated_hours') or '').strip()
+        repeat_type = request.form.get("repeat_type", "none")
 
         task = Task(
             title=title,
             priority=priority,
             deadline=deadline,
+            work_start=work_start,
             assigned_to=int(assigned_to) if assigned_to else None,
             user_id=current_user.id,
             company_id=current_user.company_id,
             project_id=int(project_id) if project_id else None,
-            estimated_hours=float(est) if est else None
+            estimated_hours=float(est) if est else None,
+            repeat_type=repeat_type,
+            created_on = datetime.utcnow(),
+            original_id=None
+
         )
         db.session.add(task)
         db.session.commit()
@@ -745,17 +1065,12 @@ def dashboard():
     )
 
 
-
 # -- TASK OPERATIONS --
 @app.route('/update_task_status/<int:task_id>', methods=['POST'])
 @login_required
 def update_task_status(task_id):
     task = Task.query.get_or_404(task_id)
     new_status = request.form.get("status")
-
-    # if task.status == "Done" and new_status != "Done":
-    #     flash("Task is already completed. You cannot update it.", "danger")
-    #     return redirect(url_for('dashboard'))
 
     # Permission checks
     if current_user.role == "user" and task.assigned_to != current_user.id:
@@ -765,27 +1080,20 @@ def update_task_status(task_id):
         if task.assigned_to not in team_ids + [current_user.id]:
             abort(403)
 
-    task.status = request.form['status']
+    task.status = new_status
 
     # If DONE → auto-adjust time
-    if request.form['status'] == 'Done':
-
+    if new_status == 'Done':
         total_active_seconds = (
             db.session.query(db.func.sum(TimeEntry.active_seconds))
             .filter(TimeEntry.task_id == task.id)
             .scalar() or 0
         )
-
         estimated_seconds = (task.estimated_hours or 0) * 3600
-
-        print("---- TASK DONE AUTO TIME FIX ----")
-        print("Estimated Seconds:", estimated_seconds)
-        print("Active Seconds:", total_active_seconds)
 
         if estimated_seconds > total_active_seconds:
             missing_seconds = estimated_seconds - total_active_seconds
             now = datetime.utcnow()
-
             new_entry = TimeEntry(
                 user_id=task.assigned_to,
                 task_id=task.id,
@@ -797,27 +1105,42 @@ def update_task_status(task_id):
                 is_running=False
             )
             db.session.add(new_entry)
-            print("Inserted missing entry:", missing_seconds)
 
     db.session.commit()
     flash("Task status updated", "success")
     return redirect(url_for('dashboard'))
+
+from sqlalchemy.orm.attributes import flag_modified
 
 @app.route('/delete_task/<int:task_id>', methods=['POST'])
 @login_required
 def delete_task(task_id):
     task = Task.query.get_or_404(task_id)
 
-    # safety: make sure it’s your company’s task
     if task.company_id != current_user.company_id:
         abort(403)
 
-    # users can only delete their own assigned tasks
     if current_user.role == "user" and task.assigned_to != current_user.id:
         abort(403)
 
-    db.session.delete(task)
-    db.session.commit()
+    # Delete comments and time entries
+    TaskComment.query.filter_by(task_id=task.id).delete()
+    TimeEntry.query.filter_by(task_id=task.id).delete()
+
+    # If this is a repeated task, mark it deleted in the original
+    if task.original_id:
+        original = Task.query.get(task.original_id)
+        if original:
+            original.deleted_dates = original.deleted_dates or []
+            original.deleted_dates.append(date.today())
+            flag_modified(original, "deleted_dates")  # Important!
+            db.session.delete(task)
+            db.session.commit()
+    else:
+        # Fully delete normal task
+        db.session.delete(task)
+        db.session.commit()
+
     flash("Task deleted", "warning")
     return redirect(url_for('dashboard'))
 
@@ -825,23 +1148,17 @@ def delete_task(task_id):
 @app.route('/export_tasks')
 @login_required
 def export_tasks():
-    # scope by role...
+    # scope by role
     if current_user.role == "admin":
-        tasks = Task.query.filter_by(
-            company_id=current_user.company_id
-        ).all()
+        tasks = Task.query.filter_by(company_id=current_user.company_id).all()
     elif current_user.role == "manager":
-        team_ids = [u.id for u in User.query.filter_by(
-            manager_id=current_user.id
-        ).all()]
+        team_ids = [u.id for u in User.query.filter_by(manager_id=current_user.id).all()]
         tasks = Task.query.filter(
             Task.company_id == current_user.company_id,
             Task.assigned_to.in_(team_ids + [current_user.id])
         ).all()
     else:
-        tasks = Task.query.filter(
-            Task.assigned_to == current_user.id
-        ).all()
+        tasks = Task.query.filter(Task.assigned_to == current_user.id).all()
 
     data = []
     for t in tasks:
@@ -850,6 +1167,7 @@ def export_tasks():
             "Title": t.title,
             "Status": t.status,
             "Priority": t.priority,
+            "Work Start Date": t.work_start.strftime("%Y-%m-%d") if t.work_start else "",  # << Added
             "Deadline": t.deadline.strftime("%Y-%m-%d") if t.deadline else "",
             "Estimated Hours": t.estimated_hours or "",
             "Assigned To (ID)": t.assigned_to,
@@ -872,7 +1190,6 @@ def export_tasks():
         download_name="tasks.xlsx",
         as_attachment=True
     )
-
 
 # -- TIMESHEETS --
 @app.route('/timesheet', methods=['GET', 'POST'])
@@ -1244,21 +1561,49 @@ def delete_user(user_id):
     return redirect(url_for('manage_users'))
 
 
-
+from sqlalchemy.orm import aliased
 
 # -- PROJECT CRUD (Admin) --
 @app.route('/projects')
 @login_required
 @admin_required
 def list_projects():
-    projects = Project.query.filter_by(company_id=current_user.company_id).all()
+    pm = aliased(ProjectMember)
+    projects = db.session.query(
+        Project,
+        func.count(pm.id).label('member_count')
+    ).outerjoin(pm, Project.id == pm.project_id)\
+     .filter(Project.company_id == current_user.company_id)\
+     .group_by(Project.id)\
+     .all()
+
+    # projects is now [(project1, 3), (project2, 0), ...]
+    return render_template('projects.html', projects=projects)
+
+    # projects is now list of tuples: (project, member_count)
     return render_template('projects.html', projects=projects)
 
 # Read-only Projects for normal users
+# @app.route('/projects_view')
+# @login_required
+# def view_projects():
+#     projects = Project.query.filter_by(company_id=current_user.company_id).all()
+#     return render_template('projects_view.html', projects=projects)
+
+
 @app.route('/projects_view')
 @login_required
 def view_projects():
-    projects = Project.query.filter_by(company_id=current_user.company_id).all()
+    # Get all projects in company
+    all_projects = Project.query.filter_by(company_id=current_user.company_id).all()
+
+    # Filter projects where current_user is a member
+    if current_user.role != "admin":
+        projects = [p for p in all_projects if current_user.id in [m.user_id for m in p.members]]
+    else:
+        # admin can see all projects
+        projects = all_projects
+
     return render_template('projects_view.html', projects=projects)
 
 
