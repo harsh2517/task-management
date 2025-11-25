@@ -860,87 +860,20 @@ def admin_user_tasks(user_id):
     tasks = Task.query.filter_by(assigned_to=user.id).all()
     return render_template('admin_user_tasks.html', user=user, tasks=tasks)
 
-
+from flask import render_template, request, redirect, url_for, flash
+from flask_login import login_required, current_user
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import func
-
-def generate_repeated_tasks():
-    today = date.today()
-
-    # Get all original repeatable tasks
-    tasks = Task.query.filter(Task.repeat_type != "none", Task.original_id == None).all()
-
-    # Build a set of original_ids that already have a repeated task today
-    # Compare only the date part
-    today_created_ids = set(
-        t.original_id for t in Task.query.filter(
-            Task.repeat_type != "none",
-            Task.original_id != None,
-            Task.company_id == current_user.company_id,
-            func.date(Task.created_on) == today
-        ).all()
-    )
-
-    for task in tasks:
-        # Skip if deleted today
-        if today in (task.deleted_dates or []):
-            continue
-
-        # Skip if a repeated task is already created today
-        if task.id in today_created_ids:
-            continue
-
-        # Determine if we should create based on repeat_type
-        should_create = False
-        new_work_start = today
-        new_deadline = task.deadline
-
-        if task.repeat_type == "daily":
-            should_create = True
-            if task.deadline:
-                new_deadline = task.deadline + timedelta(days=1)
-        elif task.repeat_type == "weekly":
-            if task.work_start and today.weekday() == task.work_start.weekday():
-                should_create = True
-                if task.deadline:
-                    new_deadline = task.deadline + timedelta(weeks=1)
-        elif task.repeat_type == "monthly":
-            if task.work_start and today.day == task.work_start.day:
-                should_create = True
-                if task.deadline:
-                    new_deadline = task.deadline + relativedelta(months=1)
-
-        # Create the repeated task if needed
-        if should_create:
-            clone = Task(
-                title=task.title,
-                priority=task.priority,
-                work_start=new_work_start,
-                deadline=new_deadline,
-                assigned_to=task.assigned_to,
-                project_id=task.project_id,
-                estimated_hours=task.estimated_hours,
-                repeat_type=task.repeat_type,
-                original_id=task.id,
-                user_id=task.user_id,
-                company_id=task.company_id,
-                created_on=datetime.utcnow()
-            )
-            db.session.add(clone)
-
-            # Immediately mark as created to prevent duplicates in the same request
-            today_created_ids.add(task.id)
-
-    db.session.commit()
+from sqlalchemy import or_, func
 
 
-# -- DASHBOARD & TASK CREATION --
 @app.route('/dashboard', methods=['GET', 'POST'])
 @login_required
 def dashboard():
 
-    generate_repeated_tasks()
+    # ---- Generate repeated tasks only on GET requests ----
+    if request.method == 'GET':
+        generate_repeated_tasks()
 
     # ---- Create Task (POST) ----
     if request.method == 'POST':
@@ -948,8 +881,8 @@ def dashboard():
         priority    = request.form.get('priority', 'Medium')
         deadline_s  = request.form.get('deadline')
         deadline    = datetime.strptime(deadline_s, "%Y-%m-%d").date() if deadline_s else None
-        work_start_s   = request.form.get('work_start')          # << New
-        work_start     = datetime.strptime(work_start_s, "%Y-%m-%d").date() if work_start_s else None  # << New
+        work_start_s = request.form.get('work_start')
+        work_start   = datetime.strptime(work_start_s, "%Y-%m-%d").date() if work_start_s else None
         assigned_to = request.form.get('assigned_to') or None
         project_id  = request.form.get('project_id') or None
         est         = (request.form.get('estimated_hours') or '').strip()
@@ -966,9 +899,8 @@ def dashboard():
             project_id=int(project_id) if project_id else None,
             estimated_hours=float(est) if est else None,
             repeat_type=repeat_type,
-            created_on = datetime.utcnow(),
+            created_on=datetime.utcnow(),
             original_id=None
-
         )
         db.session.add(task)
         db.session.commit()
@@ -991,28 +923,33 @@ def dashboard():
 
     # ---- URL filters (GET) ----
     def _pdate(s):
-        try: return datetime.strptime(s, "%Y-%m-%d").date()
-        except: return None
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except:
+            return None
 
-    # simple ones
     status   = request.args.get('status') or ""
     priority = request.args.get('priority') or ""
-    if status:   tasks_query = tasks_query.filter(Task.status == status)
-    if priority: tasks_query = tasks_query.filter(Task.priority == priority)
+    if status:
+        tasks_query = tasks_query.filter(Task.status == status)
+    if priority:
+        tasks_query = tasks_query.filter(Task.priority == priority)
 
-    # project
     pid = request.args.get('project_id') or ""
     if pid:
-        try: tasks_query = tasks_query.filter(Task.project_id == int(pid))
-        except: pass
+        try:
+            tasks_query = tasks_query.filter(Task.project_id == int(pid))
+        except: 
+            pass
 
-    # assigned_to
     aid = request.args.get('assigned_to') or ""
     if aid:
-        try: tasks_query = tasks_query.filter(Task.assigned_to == int(aid))
-        except: pass
+        try:
+            tasks_query = tasks_query.filter(Task.assigned_to == int(aid))
+        except: 
+            pass
 
-    # search across title / project / assignee
+    # Search across title / project / assignee
     q = (request.args.get('q') or "").strip()
     if q:
         like = f"%{q}%"
@@ -1020,12 +957,13 @@ def dashboard():
             tasks_query
             .outerjoin(User, Task.assigned_user)
             .outerjoin(Project, Task.project)
-            .filter(or_(Task.title.ilike(like),
-                        User.username.ilike(like),
-                        Project.name.ilike(like)))
+            .filter(or_(
+                Task.title.ilike(like),
+                User.username.ilike(like),
+                Project.name.ilike(like)
+            ))
         )
 
-    # deadline range
     due_from = _pdate(request.args.get('due_from') or "")
     due_to   = _pdate(request.args.get('due_to') or "")
     if due_from and due_to:
@@ -1041,20 +979,10 @@ def dashboard():
     projects = Project.query.filter_by(company_id=current_user.company_id).all()
 
     start_week  = datetime.today().date() - timedelta(days=datetime.today().weekday())
-    total_hours = db.session.query(db.func.sum(TimeSheet.hours)).filter(
+    total_hours = db.session.query(func.sum(TimeSheet.hours)).filter(
         TimeSheet.user_id == current_user.id,
         TimeSheet.date >= start_week
     ).scalar() or 0
-
-    return render_template('dashboard.html', tasks=tasks, users=users, projects=projects, total_hours=total_hours)
-
-    # weekly timesheet summary for logged-in user
-    start_week  = datetime.utcnow().date() - timedelta(days=datetime.utcnow().weekday())
-    total_hours = db.session.query(db.func.sum(TimeSheet.hours)) \
-                    .filter(
-                      TimeSheet.user_id == current_user.id,
-                      TimeSheet.date >= start_week
-                    ).scalar() or 0
 
     return render_template(
         'dashboard.html',
@@ -1063,6 +991,81 @@ def dashboard():
         projects=projects,
         total_hours=total_hours
     )
+
+
+# ---- Repeated Tasks Generation ----
+def generate_repeated_tasks():
+    today = date.today()
+
+    # All original repeatable tasks
+    tasks = Task.query.filter(
+        Task.repeat_type != "none",
+        Task.original_id == None,
+        Task.company_id == current_user.company_id
+    ).all()
+
+    # Original_ids that already have repeated task today
+    today_created_ids = set(
+        t.original_id for t in Task.query.filter(
+            Task.repeat_type != "none",
+            Task.original_id != None,
+            Task.company_id == current_user.company_id,
+            func.date(Task.created_on) == today
+        ).all()
+    )
+
+    for task in tasks:
+        # Skip tasks created today
+        if task.created_on.date() == today:
+            continue
+
+        # Skip if deleted today
+        if today in (task.deleted_dates or []):
+            continue
+
+        # Skip if already created today
+        if task.id in today_created_ids:
+            continue
+
+        # Decide if we should create
+        should_create = False
+        new_work_start = today
+        new_deadline = task.deadline
+
+        if task.repeat_type == "daily":
+            should_create = True
+            if task.deadline:
+                new_deadline = task.deadline + timedelta(days=1)
+        elif task.repeat_type == "weekly":
+            if task.work_start and today.weekday() == task.work_start.weekday():
+                should_create = True
+                if task.deadline:
+                    new_deadline = task.deadline + timedelta(weeks=1)
+        elif task.repeat_type == "monthly":
+            if task.work_start and today.day == task.work_start.day:
+                should_create = True
+                if task.deadline:
+                    new_deadline = task.deadline + relativedelta(months=1)
+
+        if should_create:
+            clone = Task(
+                title=task.title,
+                priority=task.priority,
+                work_start=new_work_start,
+                deadline=new_deadline,
+                assigned_to=task.assigned_to,
+                project_id=task.project_id,
+                estimated_hours=task.estimated_hours,
+                repeat_type=task.repeat_type,
+                original_id=task.id,
+                user_id=task.user_id,
+                company_id=task.company_id,
+                created_on=datetime.utcnow()
+            )
+            db.session.add(clone)
+            today_created_ids.add(task.id)
+
+    db.session.commit()
 
 
 # -- TASK OPERATIONS --
